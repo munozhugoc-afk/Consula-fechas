@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Consulta de Fechas (Meses) + Lotes</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab-btn { padding: 8px 12px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; border-radius: 6px; }
+    .tab-btn.active { background: #fff; border-bottom-color: #fff; font-weight: 600; }
+    .panel { border: 1px solid #ccc; border-radius: 8px; padding: 16px; background: #fff; }
+    .row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+    label { display: block; font-size: 12px; color: #333; margin-bottom: 4px; }
+    input[type="date"], input[type="text"] { padding: 8px; border: 1px solid #bbb; border-radius: 6px; }
+    button { padding: 8px 12px; border: 1px solid #999; background: #f2f2f2; border-radius: 6px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #fafafa; }
+    .muted { color: #666; font-size: 12px; margin-top: 10px; }
+    .nowrap { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <h1>Consulta de Fechas (por meses) + Lotes</h1>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="venc">Desde Vencimiento</button>
+    <button class="tab-btn" data-tab="elab">Desde Elaboración</button>
+  </div>
+
+  <div id="panel-venc" class="panel">
+    <div class="row">
+      <div>
+        <label>Fecha Vencimiento</label>
+        <input id="fechaVenc" type="date" />
+      </div>
+      <div>
+        <button id="btnCalcVenc">Calcular</button>
+        <button id="btnLimpiarLotes">Limpiar lotes</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="nowrap">Vida útil</th>
+          <th class="nowrap">Fecha Elaboración</th>
+          <th class="nowrap">Lote (opcional)</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyVenc"></tbody>
+    </table>
+
+    <div class="muted">
+      Nota: el cálculo resta meses calendario (maneja fin de mes correctamente).
+    </div>
+  </div>
+
+  <div id="panel-elab" class="panel" style="display:none;">
+    <div class="row">
+      <div>
+        <label>Fecha Elaboración</label>
+        <input id="fechaElab" type="date" />
+      </div>
+      <div>
+        <button id="btnCalcElab">Calcular</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="nowrap">Plazo</th>
+          <th class="nowrap">Fecha Resultante</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyElab"></tbody>
+    </table>
+
+    <div class="muted">
+      Nota: el cálculo suma meses calendario (maneja fin de mes correctamente).
+    </div>
+  </div>
+
+<script>
+  // Specs según tu tabla
+  const SPEC_FROM_EXP = [
+    { months: 6, label: "6 meses" },
+    { months: 9, label: "9 meses" },
+    { months: 12, label: "12 meses" },
+  ];
+
+  const SPEC_FROM_MFG = [
+    { months: 6, label: "6 meses" },
+    { months: 12, label: "12 meses" },
+    { months: 18, label: "18 meses" },
+    { months: 24, label: "24 meses" },
+  ];
+
+  // Utilidades de fecha
+  function pad2(n){ return String(n).padStart(2,"0"); }
+
+  function formatDDMMYYYY(d){
+    return `${pad2(d.getDate())}-${pad2(d.getMonth()+1)}-${d.getFullYear()}`;
+  }
+
+  // Sumar/restar meses manteniendo lógica fin de mes
+  function addMonths(dateObj, months){
+    const d = new Date(dateObj.getTime());
+    const day = d.getDate();
+    const targetMonth = d.getMonth() + months;
+
+    // Ir al primer día del mes objetivo
+    const tmp = new Date(d.getFullYear(), targetMonth, 1);
+    // Último día del mes objetivo
+    const lastDay = new Date(tmp.getFullYear(), tmp.getMonth()+1, 0).getDate();
+    // Ajustar día
+    tmp.setDate(Math.min(day, lastDay));
+    return tmp;
+  }
+
+  function subMonths(dateObj, months){
+    return addMonths(dateObj, -months);
+  }
+
+  // Construcción de tablas
+  const tbodyVenc = document.getElementById("tbodyVenc");
+  const tbodyElab = document.getElementById("tbodyElab");
+
+  function renderVencRows(){
+    tbodyVenc.innerHTML = "";
+    SPEC_FROM_EXP.forEach((s, idx) => {
+      const tr = document.createElement("tr");
+
+      const td1 = document.createElement("td");
+      td1.textContent = s.label;
+
+      const td2 = document.createElement("td");
+      td2.id = `mfgOut_${idx}`;
+      td2.textContent = "";
+
+      const td3 = document.createElement("td");
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.placeholder = "Ej: 19525";
+      inp.id = `lote_${idx}`;
+      td3.appendChild(inp);
+
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      tr.appendChild(td3);
+      tbodyVenc.appendChild(tr);
+    });
+  }
+
+  function renderElabRows(){
+    tbodyElab.innerHTML = "";
+    SPEC_FROM_MFG.forEach((s, idx) => {
+      const tr = document.createElement("tr");
+
+      const td1 = document.createElement("td");
+      td1.textContent = s.label;
+
+      const td2 = document.createElement("td");
+      td2.id = `addOut_${idx}`;
+      td2.textContent = "";
+
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      tbodyElab.appendChild(tr);
+    });
+  }
+
+  function parseDateInput(value){
+    // value viene como "YYYY-MM-DD"
+    if(!value) return null;
+    const [y,m,d] = value.split("-").map(Number);
+    return new Date(y, m-1, d);
+  }
+
+  function calcFromVenc(){
+    const fv = parseDateInput(document.getElementById("fechaVenc").value);
+    if(!fv){
+      alert("Seleccione una Fecha de Vencimiento.");
+      return;
+    }
+    SPEC_FROM_EXP.forEach((s, idx) => {
+      const mfg = subMonths(fv, s.months);
+      document.getElementById(`mfgOut_${idx}`).textContent = formatDDMMYYYY(mfg);
+    });
+  }
+
+  function calcFromElab(){
+    const fe = parseDateInput(document.getElementById("fechaElab").value);
+    if(!fe){
+      alert("Seleccione una Fecha de Elaboración.");
+      return;
+    }
+    SPEC_FROM_MFG.forEach((s, idx) => {
+      const out = addMonths(fe, s.months);
+      document.getElementById(`addOut_${idx}`).textContent = formatDDMMYYYY(out);
+    });
+  }
+
+  function clearLotes(){
+    SPEC_FROM_EXP.forEach((_, idx) => {
+      const el = document.getElementById(`lote_${idx}`);
+      if(el) el.value = "";
+    });
+  }
+
+  // Tabs
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      const tab = btn.dataset.tab;
+      document.getElementById("panel-venc").style.display = (tab === "venc") ? "block" : "none";
+      document.getElementById("panel-elab").style.display = (tab === "elab") ? "block" : "none";
+    });
+  });
+
+  // Inicialización
+  renderVencRows();
+  renderElabRows();
+
+  // Set default dates (hoy)
+  const today = new Date();
+  const isoToday = `${today.getFullYear()}-${pad2(today.getMonth()+1)}-${pad2(today.getDate())}`;
+  document.getElementById("fechaVenc").value = isoToday;
+  document.getElementById("fechaElab").value = isoToday;
+
+  // Eventos
+  document.getElementById("btnCalcVenc").addEventListener("click", calcFromVenc);
+  document.getElementById("btnCalcElab").addEventListener("click", calcFromElab);
+  document.getElementById("btnLimpiarLotes").addEventListener("click", clearLotes);
+
+  // Primer cálculo
+  calcFromVenc();
+  calcFromElab();
+</script>
+</body>
+</html>
